@@ -1,0 +1,54 @@
+# Preview for review (plan.md § 3, ADR 0003): run rig, save one page as one HTML file with a
+# command, deploy it to GitHub Pages. The file is never committed (ADR 0003: no previews in the
+# repo). Run again with an empty marker to upload over the same link without the lane marker (§ 4).
+name: preview
+on:
+  workflow_dispatch:
+    inputs:
+      night:
+        description: night to preview (runs/<night>.jsonl)
+        default: '2026-10-28'
+        required: true
+      marker:
+        description: LANE_MARKER for the banner; leave empty for "no marker set"
+        default: ''
+        required: false
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --no-frozen-lockfile
+      - name: save the page
+        env:
+          LANE_MARKER: ${{ inputs.marker }}
+          NIGHT: ${{ inputs.night }}
+        run: |
+          pnpm start > rig.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:8787/health > /dev/null && break; sleep 1; done
+          mkdir -p _site
+          curl -sf "http://localhost:8787/digest/${NIGHT}" -o _site/index.html
+          grep -q '<table' _site/index.html
+          grep -o '<span class="marker">[^<]*' _site/index.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+          retention-days: 1
+      - id: deploy
+        uses: actions/deploy-pages@v4
